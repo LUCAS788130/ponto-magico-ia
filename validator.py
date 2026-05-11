@@ -5,31 +5,51 @@ def horario_valido(horario):
     return bool(re.match(r"^\d{2}:\d{2}$", str(horario).strip()))
 
 
+def normalizar_horario(h):
+    h = str(h).strip()
+
+    if not h:
+        return ""
+
+    h = h.replace("h", ":").replace("H", ":")
+    h = h.replace(".", ":")
+    h = h.replace(";", ":")
+
+    if re.match(r"^\d{1}:\d{2}$", h):
+        h = "0" + h
+
+    if re.match(r"^\d{2}\d{2}$", h):
+        h = h[:2] + ":" + h[2:]
+
+    if horario_valido(h):
+        return h
+
+    return ""
+
+
 def normalizar_marcacoes(marcacoes):
     limpas = []
 
     for h in marcacoes:
-        h = str(h).strip()
+        horario = normalizar_horario(h)
 
-        if not h:
-            continue
+        if horario:
+            limpas.append(horario)
 
-        h = h.replace("h", ":").replace("H", ":")
+    # remove duplicados preservando ordem
+    unicos = []
+    for h in sorted(limpas):
+        if h not in unicos:
+            unicos.append(h)
 
-        if re.match(r"^\d{1}:\d{2}$", h):
-            h = "0" + h
-
-        if horario_valido(h):
-            limpas.append(h)
-
-    return sorted(list(dict.fromkeys(limpas)))
+    return unicos
 
 
 def validar_dados(dados):
     resultado = []
 
     for item in dados:
-        data = item.get("data", "").strip()
+        data = str(item.get("data", "")).strip()
         marcacoes = normalizar_marcacoes(item.get("marcacoes", []))
 
         alerta = ""
