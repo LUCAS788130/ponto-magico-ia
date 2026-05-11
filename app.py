@@ -1,14 +1,14 @@
 import streamlit as st
 import pandas as pd
 
-from extractor import extrair_texto_pdf, converter_pdf_em_imagens
-from ai_parser import configurar_gemini, interpretar_cartao_com_ia
+from extractor import analisar_pdf
+from ai_parser import configurar_openrouter, interpretar_cartao_com_ia
 from validator import validar_dados
 from exporter import gerar_csv, gerar_csv_pjecalc
 
 
 st.set_page_config(
-    page_title="Conversor Inteligente de Cartão de Ponto",
+    page_title="Ponto Mágico IA",
     page_icon="🕒",
     layout="wide"
 )
@@ -16,21 +16,9 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.main {
-    background-color: #0f172a;
-}
-
 .block-container {
     padding-top: 2rem;
-    max-width: 1100px;
-}
-
-.card {
-    background: #111827;
-    border: 1px solid #334155;
-    border-radius: 18px;
-    padding: 24px;
-    margin-bottom: 20px;
+    max-width: 1150px;
 }
 
 .titulo {
@@ -38,6 +26,7 @@ st.markdown("""
     font-weight: 800;
     color: #f8fafc;
     text-align: center;
+    margin-bottom: 8px;
 }
 
 .subtitulo {
@@ -47,30 +36,41 @@ st.markdown("""
     margin-bottom: 30px;
 }
 
-.alerta {
-    background: #451a1a;
-    border: 1px solid #dc2626;
-    color: #fecaca;
-    padding: 12px;
-    border-radius: 12px;
+.info-card {
+    background: #111827;
+    border: 1px solid #334155;
+    border-radius: 16px;
+    padding: 18px;
+    margin-bottom: 20px;
 }
 </style>
 """, unsafe_allow_html=True)
 
 
-st.markdown('<div class="titulo">🕒 Conversor Inteligente de Cartão de Ponto</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="subtitulo">Envie o PDF, revise as marcações e gere o CSV para utilização posterior.</div>',
+    '<div class="titulo">🕒 Ponto Mágico IA</div>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    '<div class="subtitulo">Converta cartões de ponto em PDF para CSV estruturado com auxílio de IA.</div>',
     unsafe_allow_html=True
 )
 
 
 try:
-    api_key = st.secrets["GEMINI_API_KEY"]
-    configurar_gemini(api_key)
+    api_key = st.secrets["OPENROUTER_API_KEY"]
+    configurar_openrouter(api_key)
 except Exception:
-    st.error("Configure a chave GEMINI_API_KEY no arquivo .streamlit/secrets.toml.")
+    st.error("Configure a chave OPENROUTER_API_KEY em Settings → Secrets no Streamlit.")
     st.stop()
+
+
+if "df_resultado" not in st.session_state:
+    st.session_state.df_resultado = None
+
+if "tipo_pdf" not in st.session_state:
+    st.session_state.tipo_pdf = None
 
 
 arquivo_pdf = st.file_uploader(
@@ -79,45 +79,40 @@ arquivo_pdf = st.file_uploader(
 )
 
 
-if "df_resultado" not in st.session_state:
-    st.session_state.df_resultado = None
-
-
 if arquivo_pdf:
-    col1, col2 = st.columns([1, 1])
-
-    with col1:
-        usar_imagem = st.checkbox(
-            "Usar imagens do PDF na análise da IA",
-            value=True,
-            help="Recomendado para PDFs digitalizados ou com OCR ruim."
-        )
-
-    with col2:
-        processar = st.button("🚀 Processar com IA", use_container_width=True)
+    processar = st.button(
+        "🚀 Processar com IA",
+        use_container_width=True
+    )
 
     if processar:
-        with st.spinner("Lendo PDF..."):
-            texto = extrair_texto_pdf(arquivo_pdf)
+        try:
+            with st.spinner("Analisando PDF..."):
+                analise = analisar_pdf(arquivo_pdf)
 
-        imagens = None
+            texto = analise["texto"]
+            imagens = analise["imagens"]
+            tipo = analise["tipo"]
 
-        if usar_imagem:
-            with st.spinner("Convertendo páginas em imagem..."):
-                imagens = converter_pdf_em_imagens(arquivo_pdf)
+            st.session_state.tipo_pdf = tipo
 
-        with st.spinner("A IA está interpretando o cartão de ponto..."):
-            try:
+            with st.spinner("A IA está identificando o layout e extraindo as marcações..."):
                 dados_ia = interpretar_cartao_com_ia(texto, imagens)
-                dados_validados = validar_dados(dados_ia)
-                st.session_state.df_resultado = pd.DataFrame(dados_validados)
-                st.success("Cartão processado com sucesso.")
-            except Exception as erro:
-                st.error(str(erro))
+
+            dados_validados = validar_dados(dados_ia)
+            st.session_state.df_resultado = pd.DataFrame(dados_validados)
+
+            st.success(f"Cartão processado com sucesso. Tipo detectado: {tipo}")
+
+        except Exception as erro:
+            st.error(str(erro))
 
 
 if st.session_state.df_resultado is not None:
     st.markdown("## Conferência das marcações")
+
+    if st.session_state.tipo_pdf:
+        st.info(f"Tipo de PDF detectado: {st.session_state.tipo_pdf}")
 
     df_editado = st.data_editor(
         st.session_state.df_resultado,
@@ -128,11 +123,12 @@ if st.session_state.df_resultado is not None:
 
     st.session_state.df_resultado = df_editado
 
-    alertas = df_editado[df_editado["Alerta"].astype(str).str.strip() != ""]
+    if "Alerta" in df_editado.columns:
+        alertas = df_editado[df_editado["Alerta"].astype(str).str.strip() != ""]
 
-    if not alertas.empty:
-        st.warning("Existem dias com inconsistências. Confira antes de gerar o CSV.")
-        st.dataframe(alertas, use_container_width=True, hide_index=True)
+        if not alertas.empty:
+            st.warning("Existem dias com inconsistências. Confira antes de gerar o CSV.")
+            st.dataframe(alertas, use_container_width=True, hide_index=True)
 
     col1, col2 = st.columns(2)
 
@@ -157,5 +153,6 @@ if st.session_state.df_resultado is not None:
             mime="text/csv",
             use_container_width=True
         )
+
 else:
     st.info("Envie um PDF para iniciar.")
