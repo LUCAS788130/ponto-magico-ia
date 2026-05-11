@@ -21,10 +21,14 @@ def limpar_json(resposta):
 def interpretar_cartao_com_ia(texto_pdf, imagens=None):
     """
     Usa IA Gemini para interpretar cartão de ponto.
+    Tenta modelos diferentes caso algum esteja indisponível ou sem cota.
     """
 
-    # MODELO NOVO E COMPATÍVEL
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    modelos = [
+        "gemini-1.5-flash-latest",
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash"
+    ]
 
     prompt = """
 Você é um especialista em interpretação de cartões de ponto brasileiros.
@@ -32,10 +36,10 @@ Você é um especialista em interpretação de cartões de ponto brasileiros.
 OBJETIVO:
 Extrair APENAS as marcações reais de entrada e saída.
 
-REGRAS IMPORTANTES:
+REGRAS:
 1. Identifique todas as datas do cartão.
 2. Extraia somente horários reais de marcação.
-3. Considere principalmente colunas como:
+3. Considere principalmente a coluna:
    - Marcação ou Situação Funcional
    - Marcações
    - Horários
@@ -70,31 +74,43 @@ Formato obrigatório:
   }
 ]
 
-Texto extraído:
+Texto extraído do PDF:
 """
 
     conteudo = [prompt + "\n\n" + (texto_pdf or "")]
 
-    # Adiciona imagens para IA analisar
     if imagens:
         conteudo.extend(imagens)
 
-    resposta = model.generate_content(conteudo)
+    ultimo_erro = None
 
-    texto_resposta = limpar_json(resposta.text)
+    for nome_modelo in modelos:
+        try:
+            model = genai.GenerativeModel(nome_modelo)
+            resposta = model.generate_content(conteudo)
 
-    try:
-        dados = json.loads(texto_resposta)
+            texto_resposta = limpar_json(resposta.text)
 
-    except Exception as erro:
-        raise Exception(
-            f"""
-A IA retornou resposta inválida.
+            dados = json.loads(texto_resposta)
 
-RESPOSTA DA IA:
+            return dados
 
-{texto_resposta}
+        except Exception as erro:
+            ultimo_erro = erro
+            continue
+
+    raise Exception(
+        f"""
+Não foi possível processar com nenhum modelo Gemini disponível.
+
+Possíveis causas:
+- cota gratuita zerada;
+- modelo indisponível;
+- excesso de imagens/páginas;
+- resposta da IA fora do formato JSON.
+
+Último erro:
+
+{ultimo_erro}
 """
-        ) from erro
-
-    return dados
+    )
