@@ -49,22 +49,20 @@ def interpretar_cartao_com_ia(texto_pdf, imagens=None):
         raise Exception("Cliente OpenRouter não configurado.")
 
     prompt = """
-Você é especialista em cartões de ponto brasileiros e em conversão para CSV.
+Você é especialista em cartões de ponto brasileiros.
 
-OBJETIVO:
-Extrair APENAS datas e marcações reais de ponto.
+Extraia APENAS datas e marcações reais de ponto.
 
-REGRAS OBRIGATÓRIAS:
-1. Identifique automaticamente o layout do cartão de ponto.
-2. Detecte se o documento é pesquisável ou digitalizado.
-3. Extraia somente horários reais de entrada e saída.
-4. Priorize colunas chamadas:
+Regras:
+1. Identifique automaticamente o layout.
+2. Extraia apenas horários reais de entrada e saída.
+3. Priorize colunas chamadas:
    - Marcação ou Situação Funcional
    - Marcações
    - Horários
    - Registro de ponto
    - Batidas
-5. Ignore completamente colunas ou textos como:
+4. Ignore completamente:
    - H.E 50%
    - H.E 100%
    - H.NEG
@@ -77,23 +75,16 @@ REGRAS OBRIGATÓRIAS:
    - Carga horária
    - Atrasos
    - Faltas
-6. Não invente horários.
-7. Se o dia não tiver marcação, retorne lista vazia.
-8. Ordene os horários em ordem crescente.
-9. Preserve todas as datas encontradas no cartão.
-10. Retorne SOMENTE JSON válido.
-11. Não escreva explicações.
-12. Não use markdown.
+5. Não invente horários.
+6. Dias sem marcação devem retornar lista vazia.
+7. Ordene os horários em ordem crescente.
+8. Retorne SOMENTE JSON válido, sem markdown.
 
-FORMATO OBRIGATÓRIO:
+Formato obrigatório:
 [
   {
     "data": "01/05/2026",
     "marcacoes": ["07:00", "11:00", "13:00", "17:00"]
-  },
-  {
-    "data": "02/05/2026",
-    "marcacoes": []
   }
 ]
 """
@@ -106,8 +97,7 @@ FORMATO OBRIGATÓRIO:
     ]
 
     if imagens:
-        # Limita para evitar excesso no modelo gratuito
-        for imagem in imagens[:6]:
+        for imagem in imagens[:4]:
             base64_image = imagem_para_base64(imagem)
             content.append({
                 "type": "image_url",
@@ -116,46 +106,35 @@ FORMATO OBRIGATÓRIO:
                 }
             })
 
-    modelos = [
-        "qwen/qwen2.5-vl-72b-instruct:free",
-        "qwen/qwen-2.5-vl-7b-instruct:free"
-    ]
+    try:
+        response = client.chat.completions.create(
+            model="openrouter/free",
+            messages=[
+                {
+                    "role": "user",
+                    "content": content
+                }
+            ],
+            temperature=0
+        )
 
-    ultimo_erro = None
+        resposta = response.choices[0].message.content
+        texto_limpo = limpar_json(resposta)
 
-    for modelo in modelos:
-        try:
-            response = client.chat.completions.create(
-                model=modelo,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": content
-                    }
-                ],
-                temperature=0
-            )
+        return json.loads(texto_limpo)
 
-            resposta = response.choices[0].message.content
-            texto_limpo = limpar_json(resposta)
-
-            return json.loads(texto_limpo)
-
-        except Exception as erro:
-            ultimo_erro = erro
-            continue
-
-    raise Exception(
-        f"""
-Não foi possível processar com os modelos gratuitos do OpenRouter.
+    except Exception as erro:
+        raise Exception(
+            f"""
+Não foi possível processar com o roteador gratuito do OpenRouter.
 
 Possíveis causas:
-- modelo gratuito indisponível no momento;
 - limite gratuito atingido;
+- nenhum modelo gratuito com visão disponível no momento;
 - PDF muito grande;
 - resposta da IA fora do JSON.
 
 Último erro:
-{ultimo_erro}
+{erro}
 """
-    )
+        )
