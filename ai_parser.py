@@ -20,34 +20,42 @@ def limpar_json(resposta):
 
 def interpretar_cartao_com_ia(texto_pdf, imagens=None):
     """
-    Usa IA para interpretar cartão de ponto.
-    Retorna lista de dias com marcações.
+    Usa IA Gemini para interpretar cartão de ponto.
     """
 
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    # MODELO NOVO E COMPATÍVEL
+    model = genai.GenerativeModel("gemini-2.0-flash")
 
     prompt = """
-Você é um assistente especializado em converter cartões de ponto para CSV do PJe-Calc.
+Você é um especialista em interpretação de cartões de ponto brasileiros.
 
-Sua tarefa:
-1. Identificar todos os dias do período.
-2. Extrair APENAS as marcações reais de ponto.
-3. Considerar prioritariamente a coluna chamada "Marcação ou Situação Funcional", "Marcações", "Horários" ou equivalente.
-4. Ignorar colunas como:
+OBJETIVO:
+Extrair APENAS as marcações reais de entrada e saída.
+
+REGRAS IMPORTANTES:
+1. Identifique todas as datas do cartão.
+2. Extraia somente horários reais de marcação.
+3. Considere principalmente colunas como:
+   - Marcação ou Situação Funcional
+   - Marcações
+   - Horários
+   - Registro de ponto
+4. Ignore completamente:
    - H.E 50%
    - H.E 100%
    - H.NEG
    - Horas Extras
-   - Total
-   - Saldo
    - Banco de horas
+   - Saldo
    - Observações
-   - Jornada
-   - Carga horária
-5. Não inventar horários.
-6. Manter dias sem marcação com lista vazia.
-7. Ordenar horários em ordem crescente.
-8. Retornar exclusivamente JSON válido.
+   - Totais
+   - Adicionais
+5. NÃO invente horários.
+6. Se não houver marcação no dia, retorne lista vazia.
+7. Ordene os horários cronologicamente.
+8. Retorne SOMENTE JSON válido.
+9. Não escreva explicações.
+10. Não use markdown.
 
 Formato obrigatório:
 
@@ -62,20 +70,31 @@ Formato obrigatório:
   }
 ]
 
-Texto extraído do PDF:
+Texto extraído:
 """
 
     conteudo = [prompt + "\n\n" + (texto_pdf or "")]
 
+    # Adiciona imagens para IA analisar
     if imagens:
         conteudo.extend(imagens)
 
     resposta = model.generate_content(conteudo)
+
     texto_resposta = limpar_json(resposta.text)
 
     try:
         dados = json.loads(texto_resposta)
+
     except Exception as erro:
-        raise ValueError(f"A IA não retornou JSON válido:\n\n{texto_resposta}") from erro
+        raise Exception(
+            f"""
+A IA retornou resposta inválida.
+
+RESPOSTA DA IA:
+
+{texto_resposta}
+"""
+        ) from erro
 
     return dados
